@@ -6,6 +6,7 @@ type Host struct {
 	Port    int    `yaml:"port"`
 	User    string `yaml:"user"`
 	Passwd  string `yaml:"passwd"`
+	Router  string `yaml:"router"`
 }
 
 // System 表示系统主机配置

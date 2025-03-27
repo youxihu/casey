@@ -8,13 +8,15 @@ type Inspection struct {
 	Os           string        `json:"os"`           // 操作系统
 	Ip           string        `json:"ip"`           // IP 地址
 	Cpu          CpuInfo       `json:"cpu"`          // CPU 信息
+	CpuLoad      [3]float64    `json:"cpuLoad"`      // 负载平均值
 	Memory       MemInfo       `json:"memory"`       // 内存信息
 	Disk         []DiskInfo    `json:"disk"`         // 磁盘信息（多磁盘）
+	Router       string        `json:"router"`       // casey结构体中网卡接口
 	Network      []NetInfo     `json:"network"`      // 网络信息（多网卡）
 	Processes    uint32        `json:"processes"`    // 进程总数
 	ZombieProcs  uint32        `json:"zombieProcs"`  // 僵尸进程数
 	TopProcesses []ProcessInfo `json:"topProcesses"` // 前 N 个高占用进程
-	CpuLoad      [3]float64    `json:"cpuLoad"`      // 负载平均值
+	Output       string        `json:"output"`
 }
 
 // CPU 信息

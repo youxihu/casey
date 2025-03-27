@@ -2,70 +2,27 @@ package service
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"github.com/youxihu/casey/internal/str"
 	"golang.org/x/crypto/ssh"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// 运行远程命令
-func runRemoteCommand(session *ssh.Session, command string) (string, error) {
-	output, err := session.CombinedOutput(command)
-	if err != nil {
-		return "", fmt.Errorf("命令 %s 执行失败: %v", command, err)
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-// 创建新的 SSH 会话
-func newSession(client *ssh.Client) (*ssh.Session, error) {
-	if client == nil {
-		return nil, fmt.Errorf("SSH 客户端为空")
-	}
-	session, err := client.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("创建 SSH 会话失败: %v", err)
-	}
-	return session, nil
-}
-
-// 运行命令并返回默认值（若失败）
-func runRemoteCommandOrDefault(client *ssh.Client, command, defaultValue string) string {
-	session, err := newSession(client)
-	if err != nil {
-		return defaultValue
-	}
-	defer session.Close()
-	output, err := runRemoteCommand(session, command)
-	if err != nil {
-		return defaultValue
-	}
-	return output
-}
-
 // SSH 连接主函数
-func sshConnect(ip string, port int, user, password string) (*str.Inspection, error) {
-	config := &ssh.ClientConfig{
-		User:            user,
-		Auth:            []ssh.AuthMethod{ssh.Password(password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         5 * time.Second,
-	}
-
-	address := fmt.Sprintf("%s:%d", ip, port)
-	client, err := ssh.Dial("tcp", address, config)
+func sshConnect(ip string, port int, user, password string, router string) (*str.Inspection, error) {
+	client, err := createSSHClient(ip, port, user, password)
 	if err != nil {
-		return nil, fmt.Errorf("无法连接到 %s: %v", address, err)
+		return nil, fmt.Errorf("无法连接到 %s: %v", ip, err)
 	}
 	defer client.Close()
 
 	inspection := &str.Inspection{
 		Timestamp: time.Now(),
 		Ip:        ip,
+		Router:    router,
 	}
-
 	// 逐个采集信息
 	if err := collectBasicInfo(client, inspection); err != nil {
 		fmt.Printf("采集基本信息失败: %v\n", err)
@@ -249,13 +206,14 @@ func collectNetworkInfo(client *ssh.Client, insp *str.Inspection) error {
 		return err
 	}
 	defer session.Close()
-	netOutput, err := runRemoteCommand(session, "cat /proc/net/dev")
+	cmd := fmt.Sprintf("cat /proc/net/dev | grep -w  %s", insp.Router)
+	netOutput, err := runRemoteCommand(session, cmd)
 	if err != nil {
 		return err
 	}
 	lines := strings.Split(netOutput, "\n")
 	var netInfos []str.NetInfo
-	for _, line := range lines[2:] {
+	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) < 10 {
 			continue
@@ -326,13 +284,13 @@ func collectProcessInfo(client *ssh.Client, insp *str.Inspection) error {
 		insp.ZombieProcs = uint32(parseUint(zombieCount))
 	}
 
-	// 前 5 个高 CPU 进程
+	// 前 10 个高 CPU 进程
 	session, err = newSession(client)
 	if err != nil {
 		return err
 	}
 	defer session.Close()
-	topOutput, err := runRemoteCommand(session, "ps -eo pid,comm,pcpu,rss --sort=-pcpu | head -n 6") // 跳过表头取前5
+	topOutput, err := runRemoteCommand(session, "ps -eo pid,comm,pcpu,rss --sort=-pcpu | head -n 11") // 跳过表头取前5
 	if err != nil {
 		fmt.Printf("无法获取高 CPU 进程: %v\n", err)
 	} else {
@@ -378,6 +336,33 @@ func collectLoadAverage(client *ssh.Client, insp *str.Inspection) error {
 	return nil
 }
 
+func ConnectToServers(configs []*str.Config) []*str.Inspection {
+	var results []*str.Inspection
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, config := range configs {
+		for _, system := range config.System {
+			for name, host := range system.Hosts {
+				wg.Add(1)
+				go func(name string, host str.Host) {
+					defer wg.Done()
+					inspection, err := sshConnect(host.Address, host.Port, host.User, host.Passwd, host.Router)
+					if err != nil {
+						fmt.Printf("连接 %s 失败: %v\n", name, err)
+						return
+					}
+					mu.Lock()
+					results = append(results, inspection)
+					mu.Unlock()
+				}(name, host)
+			}
+		}
+	}
+	wg.Wait() // 等待所有 Goroutines 完成
+	return results
+}
+
 // 工具函数
 func parseFloat(s string) float64 {
 	value, _ := strconv.ParseFloat(s, 64)
@@ -387,49 +372,4 @@ func parseFloat(s string) float64 {
 func parseUint(s string) uint64 {
 	value, _ := strconv.ParseUint(s, 10, 64)
 	return value
-}
-
-func ConnectToServers(configs []*str.Config) []*str.Inspection {
-	var results []*str.Inspection
-	for _, config := range configs {
-		for _, system := range config.System {
-			for name, host := range system.Hosts {
-				fmt.Printf("尝试 SSH 连接 %s (%s:%d)\n", name, host.Address, host.Port)
-				inspection, err := sshConnect(host.Address, host.Port, host.User, host.Passwd)
-				if err != nil {
-					fmt.Printf("连接 %s 失败: %v\n", name, err)
-					continue
-				}
-				results = append(results, inspection)
-			}
-		}
-	}
-	return results
-}
-
-// SetupHTTP 使用 Gin 启动 HTTP 服务
-func SetupHTTP(configs []*str.Config, addr string) error {
-	router := gin.Default()
-
-	// 定义 GET /inspect 接口
-	router.GET("/inspect", func(c *gin.Context) {
-		// 调用原有函数获取检查结果
-		inspections := ConnectToServers(configs)
-
-		// 返回 JSON 响应
-		if len(inspections) == 0 {
-			c.JSON(200, gin.H{
-				"message": "没有成功采集到任何数据",
-				"data":    []interface{}{},
-			})
-		} else {
-			c.JSON(200, gin.H{
-				"message": "成功采集数据",
-				"data":    inspections,
-			})
-		}
-	})
-
-	fmt.Printf("HTTP 服务启动在 %s\n", addr)
-	return router.Run(addr)
 }

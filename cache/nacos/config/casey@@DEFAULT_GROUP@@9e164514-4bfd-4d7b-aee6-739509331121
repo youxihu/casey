@@ -5,11 +5,19 @@ system:
         port: 2345
         user: youxihu
         passwd: 1
+        router: ens33
       s2:
         address: 47.238.211.146
         port: 3215
         user: casey
         passwd: 1
+        router: eth0
+      s3:
+        address: 120.26.168.226
+        port: 22
+        user: casey
+        passwd: 1
+        router: eth0
 
 process:
   - mysql:
