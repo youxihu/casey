@@ -1,12 +1,24 @@
 package service
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/youxihu/casey/internal/str"
+	"net/http"
 )
 
 func SetupHTTP(configs []*str.Config, addr string) error {
 	router := gin.Default()
+	// 静态文件服务（提供前端资源）
+	router.Static("/static", "./internal/frontend") // 提供静态资源
+
+	// 加载 HTML 模板
+	router.LoadHTMLFiles("./internal/frontend/inspection.html")
+
+	// 提供可视化页面
+	router.GET("/visualize", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "inspection.html", nil)
+	})
 
 	// 原有的 GET /ops/inspect 接口
 	router.GET("/ops/inspect", func(c *gin.Context) {
@@ -48,6 +60,7 @@ func SetupHTTP(configs []*str.Config, addr string) error {
 
 		// 解析 JSON 请求体
 		if err := c.ShouldBindJSON(&requestBody); err != nil {
+			fmt.Println("error:", err)
 			c.JSON(400, gin.H{
 				"error": "无效的请求体格式",
 			})

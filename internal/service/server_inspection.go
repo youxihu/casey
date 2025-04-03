@@ -1,12 +1,13 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"github.com/youxihu/casey/internal/str"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sync/errgroup"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -22,6 +23,7 @@ func sshConnect(ip string, port int, user, password string, router string) (*str
 		Timestamp: time.Now(),
 		Ip:        ip,
 		Router:    router,
+		Output:    "已生成可视化报告,点击查看",
 	}
 	// 逐个采集信息
 	if err := collectBasicInfo(client, inspection); err != nil {
@@ -338,28 +340,28 @@ func collectLoadAverage(client *ssh.Client, insp *str.Inspection) error {
 
 func ConnectToServers(configs []*str.Config) []*str.Inspection {
 	var results []*str.Inspection
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+
+	var eg, _ = errgroup.WithContext(context.Background())
 
 	for _, config := range configs {
 		for _, system := range config.System {
 			for name, host := range system.Hosts {
-				wg.Add(1)
-				go func(name string, host str.Host) {
-					defer wg.Done()
+				eg.Go(func() error {
 					inspection, err := sshConnect(host.Address, host.Port, host.User, host.Passwd, host.Router)
 					if err != nil {
 						fmt.Printf("连接 %s 失败: %v\n", name, err)
-						return
+						return err
 					}
-					mu.Lock()
 					results = append(results, inspection)
-					mu.Unlock()
-				}(name, host)
+					return nil
+				})
 			}
 		}
 	}
-	wg.Wait() // 等待所有 Goroutines 完成
+	err := eg.Wait()
+	if err != nil {
+		return nil
+	}
 	return results
 }
 

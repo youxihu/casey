@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AiOps运维智能体可视化报告</title>
+    <script src="/static/echarts.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f4f9; /* 背景颜色保持不变 */
+            height: 100vh;
+            overflow: hidden;
+        }
+        .chart-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .chart-container {
+            width: 28%;
+            height: 350px;
+            margin: 5px;
+            position: relative;
+            background: rgba(255, 255, 255, 0.1); /* 半透明背景 */
+            backdrop-filter: blur(10px); /* 背景模糊 */
+            border-radius: 0; /* 移除圆角 */
+            box-shadow: none; /* 移除阴影 */
+            border: none; /* 移除边框 */
+        }
+        h1 {
+            text-align: center;
+            margin: 20px 0;
+            color: #333; /* 文字颜色更清晰 */
+            text-shadow: none; /* 移除文字阴影 */
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666; /* 加载文字颜色 */
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<h1>AiOps运维智能体可视化报告</h1>
+
+<div class="chart-row">
+    <div id="cpu-chart" class="chart-container"><div class="loading">加载中...</div></div>
+    <div id="memory-chart" class="chart-container"><div class="loading">加载中...</div></div>
+    <div id="disk-chart" class="chart-container"><div class="loading">加载中...</div></div>
+</div>
+<div class="chart-row">
+    <div id="network-chart" class="chart-container"><div class="loading">加载中...</div></div>
+    <div id="processes-chart" class="chart-container"><div class="loading">加载中...</div></div>
+</div>
+
+<script>
+    // 初始化 ECharts 实例
+    const charts = {
+        cpu: echarts.init(document.getElementById('cpu-chart')),
+        memory: echarts.init(document.getElementById('memory-chart')),
+        disk: echarts.init(document.getElementById('disk-chart')),
+        network: echarts.init(document.getElementById('network-chart')),
+        processes: echarts.init(document.getElementById('processes-chart'))
+    };
+
+    // 获取数据并渲染图表
+    fetch('/ops/inspect')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Received data:', data);
+            const inspections = data.data;
+
+            // CPU 用户态运行时间饼图（单位：小时）
+            charts.cpu.setOption({
+                title: { text: 'CPU 用户态运行时间 (小时)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} 小时' },
+                color: ['#FF6F61', '#6B5B95', '#88B04B', '#F7CAC9', '#92A8D1'],
+                series: [{
+                    name: 'CPU 用户态',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '60%'],
+                    data: inspections.map(item => ({
+                        name: item.hostname,
+                        value: ((item.cpu?.user || 0) / 3600).toFixed(2) // 秒转换为小时，保留两位小数
+                    })),
+                    label: { show: true, formatter: '{b}: {c} 小时', color: '#333' },
+                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                }]
+            });
+
+            // 内存使用量饼图
+            charts.memory.setOption({
+                title: { text: '内存使用量 (GB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} GB' },
+                color: ['#FFD700', '#24cfca', '#32CD32', '#00BFFF', '#ffb6c1'],
+                series: [{
+                    name: '内存使用量',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '60%'],
+                    data: inspections.map(item => ({
+                        name: item.hostname,
+                        value: (item.memory?.used / (1024 * 1024 * 1024)).toFixed(2) || 0
+                    })),
+                    label: { show: true, formatter: '{b}: {c} GB', color: '#333' },
+                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                }]
+            });
+
+            // 磁盘使用量饼图
+            charts.disk.setOption({
+                title: { text: '磁盘使用量 (GB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} GB' },
+                color: ['#FF69B4', '#4682B4', '#2E8B57', '#FFA500', '#8A2BE2'],
+                series: [{
+                    name: '磁盘使用量',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '60%'],
+                    data: inspections.map(item => ({
+                        name: item.hostname,
+                        value: (item.disk[0]?.used / (1024 * 1024 * 1024)).toFixed(2) || 0
+                    })),
+                    label: { show: true, formatter: '{b}: {c} GB', color: '#333' },
+                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                }]
+            });
+
+            // 网络流量饼图
+            charts.network.setOption({
+                title: { text: '网络流量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
+                color: ['#FF1493', '#00CED1', '#FF8C00', '#7B68EE', '#20B2AA'],
+                series: [{
+                    name: '网络流量',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '60%'],
+                    data: inspections.map(item => ({
+                        name: item.hostname,
+                        value: ((item.network[0]?.sent + item.network[0]?.recv) / (1024 * 1024)).toFixed(2) || 0
+                    })),
+                    label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
+                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                }]
+            });
+
+            // 进程数量饼图
+            charts.processes.setOption({
+                title: { text: '进程数量', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c}' },
+                color: ['#FF4500', '#00FA9A', '#8A2BE2', '#FFD700', '#1E90FF'],
+                series: [{
+                    name: '进程数量',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '60%'],
+                    data: inspections.map(item => ({
+                        name: item.hostname,
+                        value: (item.processes || 0) + (item.zombieProcs || 0)
+                    })),
+                    label: { show: true, formatter: '{b}: {c}', color: '#333' },
+                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+                }]
+            });
+        })
+        .catch(error => {
+            console.error('Error fetching data:', error);
+            Object.values(charts).forEach(chart => chart.showLoading({ text: '数据加载失败', color: '#333' }));
+        });
+</script>
+</body>
+</html>

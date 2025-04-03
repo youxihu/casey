@@ -13,6 +13,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载 Nacos 认证失败: %v", err)
 	}
+	fmt.Println(nacosConfig)
 
 	// 2. 创建 Nacos 客户端
 	_, err = nacos.CreateNacosClient(nacosConfig)
