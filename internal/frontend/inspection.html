@@ -86,10 +86,10 @@
             console.log('Received data:', data);
             const inspections = data.data;
 
-            // CPU 用户态运行时间饼图（单位：小时）
+            // CPU 用户态运行时间饼图（单位：分钟）
             charts.cpu.setOption({
-                title: { text: 'CPU 用户态运行时间 (小时)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} 小时' },
+                title: { text: 'CPU 用户态运行时间 (分钟)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} 分钟' },
                 color: ['#FF6F61', '#6B5B95', '#88B04B', '#F7CAC9', '#92A8D1'],
                 series: [{
                     name: 'CPU 用户态',
@@ -98,17 +98,17 @@
                     center: ['50%', '60%'],
                     data: inspections.map(item => ({
                         name: item.hostname,
-                        value: ((item.cpu?.user || 0) / 3600).toFixed(2) // 秒转换为小时，保留两位小数
+                        value: item.cpu?.user || 0 // 单位已经是分钟
                     })),
-                    label: { show: true, formatter: '{b}: {c} 小时', color: '#333' },
+                    label: { show: true, formatter: '{b}: {c} 分钟', color: '#333' },
                     emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
                 }]
             });
 
-            // 内存使用量饼图
+            // 内存使用量饼图（单位：MB）
             charts.memory.setOption({
-                title: { text: '内存使用量 (GB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} GB' },
+                title: { text: '内存使用量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
                 color: ['#FFD700', '#24cfca', '#32CD32', '#00BFFF', '#ffb6c1'],
                 series: [{
                     name: '内存使用量',
@@ -117,17 +117,17 @@
                     center: ['50%', '60%'],
                     data: inspections.map(item => ({
                         name: item.hostname,
-                        value: (item.memory?.used / (1024 * 1024 * 1024)).toFixed(2) || 0
+                        value: item.memory?.used || 0 // 单位已经是 MB
                     })),
-                    label: { show: true, formatter: '{b}: {c} GB', color: '#333' },
+                    label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
                     emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
                 }]
             });
 
-            // 磁盘使用量饼图
+            // 磁盘使用量饼图（单位：MB）
             charts.disk.setOption({
-                title: { text: '磁盘使用量 (GB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} GB' },
+                title: { text: '磁盘使用量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
                 color: ['#FF69B4', '#4682B4', '#2E8B57', '#FFA500', '#8A2BE2'],
                 series: [{
                     name: '磁盘使用量',
@@ -136,14 +136,14 @@
                     center: ['50%', '60%'],
                     data: inspections.map(item => ({
                         name: item.hostname,
-                        value: (item.disk[0]?.used / (1024 * 1024 * 1024)).toFixed(2) || 0
+                        value: item.disk[0]?.used || 0 // 单位已经是 MB
                     })),
-                    label: { show: true, formatter: '{b}: {c} GB', color: '#333' },
+                    label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
                     emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
                 }]
             });
 
-            // 网络流量饼图
+            // 网络流量饼图（单位：MB）
             charts.network.setOption({
                 title: { text: '网络流量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
                 tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
@@ -155,7 +155,7 @@
                     center: ['50%', '60%'],
                     data: inspections.map(item => ({
                         name: item.hostname,
-                        value: ((item.network[0]?.sent + item.network[0]?.recv) / (1024 * 1024)).toFixed(2) || 0
+                        value: ((item.network[0]?.sent || 0) + (item.network[0]?.recv || 0)) // 单位已经是 MB
                     })),
                     label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
                     emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
@@ -164,7 +164,7 @@
 
             // 进程数量饼图
             charts.processes.setOption({
-                title: { text: '进程数量', left: 'center', top: '5%', textStyle: { color: '#333' } },
+                title: { text: '进程数量 (个)', left: 'center', top: '5%', textStyle: { color: '#333' } },
                 tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c}' },
                 color: ['#FF4500', '#00FA9A', '#8A2BE2', '#FFD700', '#1E90FF'],
                 series: [{

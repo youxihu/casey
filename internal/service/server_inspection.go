@@ -6,6 +6,7 @@ import (
 	"github.com/youxihu/casey/internal/str"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -25,278 +26,237 @@ func sshConnect(ip string, port int, user, password string, router string) (*str
 		Router:    router,
 		Output:    "已生成可视化报告,点击查看",
 	}
-	// 逐个采集信息
-	if err := collectBasicInfo(client, inspection); err != nil {
-		fmt.Printf("采集基本信息失败: %v\n", err)
+
+	// 使用通用函数执行采集任务
+	tasks := []func(*ssh.Client, *str.Inspection) error{
+		collectBasicInfo,
+		collectCpuInfo,
+		collectMemoryInfo,
+		collectDiskInfo,
+		collectNetworkInfo,
+		collectProcessInfo,
+		collectLoadAverage,
 	}
-	if err := collectCpuInfo(client, inspection); err != nil {
-		fmt.Printf("采集 CPU 信息失败: %v\n", err)
-	}
-	if err := collectMemoryInfo(client, inspection); err != nil {
-		fmt.Printf("采集内存信息失败: %v\n", err)
-	}
-	if err := collectDiskInfo(client, inspection); err != nil {
-		fmt.Printf("采集磁盘信息失败: %v\n", err)
-	}
-	if err := collectNetworkInfo(client, inspection); err != nil {
-		fmt.Printf("采集网络信息失败: %v\n", err)
-	}
-	if err := collectProcessInfo(client, inspection); err != nil {
-		fmt.Printf("采集进程信息失败: %v\n", err)
-	}
-	if err := collectLoadAverage(client, inspection); err != nil {
-		fmt.Printf("采集负载平均值失败: %v\n", err)
+
+	for _, task := range tasks {
+		if err := task(client, inspection); err != nil {
+			fmt.Printf("采集信息失败: %v\n", err)
+		}
 	}
 
 	return inspection, nil
 }
 
-// 采集基本信息（主机名、操作系统）
-func collectBasicInfo(client *ssh.Client, insp *str.Inspection) error {
+// 通用命令执行和解析函数
+func runCommandAndParse(client *ssh.Client, command string, parser func(string) error) error {
 	session, err := newSession(client)
 	if err != nil {
 		return err
 	}
 	defer session.Close()
-	insp.Hostname, err = runRemoteCommand(session, "hostname")
-	if err != nil {
-		return err
-	}
 
-	session, err = newSession(client)
+	output, err := runRemoteCommand(session, command)
 	if err != nil {
 		return err
 	}
-	defer session.Close()
-	insp.Os, err = runRemoteCommand(session, "uname -s")
-	return err
+	return parser(output)
 }
 
-// 采集 CPU 信息
+// 采集基本信息（主机名、操作系统）
+func collectBasicInfo(client *ssh.Client, insp *str.Inspection) error {
+	err := runCommandAndParse(client, "hostname", func(output string) error {
+		insp.Hostname = output
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return runCommandAndParse(client, "uname -s", func(output string) error {
+		insp.Os = output
+		return nil
+	})
+}
+
 func collectCpuInfo(client *ssh.Client, insp *str.Inspection) error {
-	session, err := newSession(client)
-	if err != nil {
-		return err
+	var fields []string
+	err := runCommandAndParse(client, "cat /proc/stat | grep '^cpu '", func(output string) error {
+		fields = strings.Fields(output)
+		return nil
+	})
+	if err != nil || len(fields) < 5 {
+		return fmt.Errorf("CPU 数据格式错误")
 	}
-	defer session.Close()
-	output, err := runRemoteCommand(session, "cat /proc/stat | grep '^cpu '")
-	if err != nil {
-		return err
-	}
-	fields := strings.Fields(output)
-	if len(fields) < 5 {
-		return fmt.Errorf("CPU 数据格式错误: %s", output)
-	}
+
 	totalCores, _ := strconv.ParseUint(runRemoteCommandOrDefault(client, "nproc", "1"), 10, 64)
 	insp.Cpu = str.CpuInfo{
 		Total:  totalCores,
-		User:   parseFloat(fields[1]),
-		System: parseFloat(fields[3]),
-		Idle:   parseFloat(fields[4]),
+		User:   roundToThreeDecimalPlaces(parseFloat(fields[1]) / 60), // 转换为分钟，保留三位小数
+		System: roundToThreeDecimalPlaces(parseFloat(fields[3]) / 60), // 转换为分钟，保留三位小数
+		Idle:   roundToThreeDecimalPlaces(parseFloat(fields[4]) / 60), // 转换为分钟，保留三位小数
 	}
 	return nil
 }
 
-// 采集内存信息
 func collectMemoryInfo(client *ssh.Client, insp *str.Inspection) error {
-	session, err := newSession(client)
+	memTotal, memFree, swapTotal, swapFree := uint64(0), uint64(0), uint64(0), uint64(0)
+	err := runCommandAndParse(client, "cat /proc/meminfo", func(output string) error {
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			switch fields[0] {
+			case "MemTotal:":
+				memTotal = parseUint(fields[1]) * 1024
+			case "MemFree:":
+				memFree = parseUint(fields[1]) * 1024
+			case "SwapTotal:":
+				swapTotal = parseUint(fields[1]) * 1024
+			case "SwapFree:":
+				swapFree = parseUint(fields[1]) * 1024
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	defer session.Close()
-	output, err := runRemoteCommand(session, "cat /proc/meminfo")
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(output, "\n")
-	var memTotal, memFree, swapTotal, swapFree uint64
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		switch fields[0] {
-		case "MemTotal:":
-			memTotal = parseUint(fields[1]) * 1024 // 转换为字节
-		case "MemFree:":
-			memFree = parseUint(fields[1]) * 1024
-		case "SwapTotal:":
-			swapTotal = parseUint(fields[1]) * 1024
-		case "SwapFree:":
-			swapFree = parseUint(fields[1]) * 1024
-		}
-	}
+
+	// 转换为 MB
 	insp.Memory = str.MemInfo{
-		Total:     memTotal,
-		Used:      memTotal - memFree,
-		Free:      memFree,
-		SwapTotal: swapTotal,
-		SwapUsed:  swapTotal - swapFree,
+		Total:     bytesToMB(memTotal),
+		Used:      bytesToMB(memTotal - memFree),
+		Free:      bytesToMB(memFree),
+		SwapTotal: bytesToMB(swapTotal),
+		SwapUsed:  bytesToMB(swapTotal - swapFree),
 	}
 	return nil
 }
 
-// 采集磁盘信息（只收集根分区 / 的信息）
 func collectDiskInfo(client *ssh.Client, insp *str.Inspection) error {
-	// 获取磁盘空间
-	session, err := newSession(client)
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-	output, err := runRemoteCommand(session, "df -B1")
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(output, "\n")
 	var rootDisk str.DiskInfo
-	for _, line := range lines[1:] { // 跳过表头
-		fields := strings.Fields(line)
-		if len(fields) < 6 {
-			continue
-		}
-		if fields[5] == "/" { // 只处理根分区
-			total := parseUint(fields[1])
-			used := parseUint(fields[2])
-			free := parseUint(fields[3])
+	err := runCommandAndParse(client, "df -B1", func(output string) error {
+		lines := strings.Split(output, "\n")
+		for _, line := range lines[1:] { // 跳过表头
+			fields := strings.Fields(line)
+			if len(fields) < 6 || fields[5] != "/" {
+				continue
+			}
 			rootDisk = str.DiskInfo{
 				Path:  fields[5],
-				Total: total,
-				Used:  used,
-				Free:  free,
+				Total: parseUint(fields[1]),
+				Used:  parseUint(fields[2]),
+				Free:  parseUint(fields[3]),
 			}
-			break // 找到根分区后退出循环
+			break
 		}
-	}
-
-	// 获取根分区的 IO 统计
-	session, err = newSession(client)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	defer session.Close()
-	ioOutput, err := runRemoteCommand(session, "cat /proc/diskstats")
-	if err != nil {
-		fmt.Printf("无法获取磁盘 IO 统计: %v\n", err)
-	} else {
-		ioLines := strings.Split(ioOutput, "\n")
+
+	err = runCommandAndParse(client, "cat /proc/diskstats", func(output string) error {
+		ioLines := strings.Split(output, "\n")
 		for _, ioLine := range ioLines {
 			ioFields := strings.Fields(ioLine)
 			if len(ioFields) < 14 {
 				continue
 			}
-			// 假设根分区的设备名可以通过 /proc/diskstats 匹配（简化处理）
-			diskName := ioFields[2] // 设备名，如 sda
+			diskName := ioFields[2]
 			if strings.Contains(rootDisk.Path, diskName) || rootDisk.Path == "/" {
-				rootDisk.IoRead = parseUint(ioFields[5]) * 512  // 读取扇区数 * 512 字节
-				rootDisk.IoWrite = parseUint(ioFields[9]) * 512 // 写入扇区数 * 512 字节
+				rootDisk.IoRead = bytesToMB(parseUint(ioFields[5]) * 512)  // 转换为 MB
+				rootDisk.IoWrite = bytesToMB(parseUint(ioFields[9]) * 512) // 转换为 MB
 				break
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	// 只将根分区信息存入 insp.Disk
+	// 转换为 MB
+	rootDisk.Total = bytesToMB(rootDisk.Total)
+	rootDisk.Used = bytesToMB(rootDisk.Used)
+	rootDisk.Free = bytesToMB(rootDisk.Free)
+
 	insp.Disk = []str.DiskInfo{rootDisk}
 	return nil
 }
 
-// 采集网络信息
 func collectNetworkInfo(client *ssh.Client, insp *str.Inspection) error {
-	// 获取网卡流量
-	session, err := newSession(client)
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-	cmd := fmt.Sprintf("cat /proc/net/dev | grep -w  %s", insp.Router)
-	netOutput, err := runRemoteCommand(session, cmd)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(netOutput, "\n")
+	cmd := fmt.Sprintf("cat /proc/net/dev | grep -w %s", insp.Router)
 	var netInfos []str.NetInfo
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) < 10 {
-			continue
+	err := runCommandAndParse(client, cmd, func(output string) error {
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) < 10 {
+				continue
+			}
+			iface := strings.TrimRight(fields[0], ":")
+			netInfos = append(netInfos, str.NetInfo{
+				Interface: iface,
+				Recv:      bytesToMB(parseUint(fields[1])), // 转换为 MB
+				Sent:      bytesToMB(parseUint(fields[9])), // 转换为 MB
+			})
 		}
-		iface := strings.TrimRight(fields[0], ":")
-		recv := parseUint(fields[1])
-		sent := parseUint(fields[9])
-		netInfos = append(netInfos, str.NetInfo{
-			Interface: iface,
-			Recv:      recv,
-			Sent:      sent,
-		})
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	insp.Network = netInfos
 
-	// 获取 TCP 状态
-	session, err = newSession(client)
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-	tcpOutput, err := runRemoteCommand(session, "cat /proc/net/tcp")
-	if err != nil {
-		return err
-	}
-	for i := range insp.Network {
-		var tcpEstab, tcpTimeWait uint64
-		tcpLines := strings.Split(tcpOutput, "\n")
-		for _, line := range tcpLines[1:] {
-			fields := strings.Fields(line)
-			if len(fields) < 4 {
-				continue
-			}
-			switch fields[3] {
-			case "01": // ESTABLISHED
-				tcpEstab++
-			case "06": // TIME_WAIT
-				tcpTimeWait++
+	err = runCommandAndParse(client, "cat /proc/net/tcp", func(output string) error {
+		for i := range insp.Network {
+			tcpLines := strings.Split(output, "\n")
+			for _, line := range tcpLines[1:] {
+				fields := strings.Fields(line)
+				if len(fields) < 4 {
+					continue
+				}
+				switch fields[3] {
+				case "01": // ESTABLISHED
+					insp.Network[i].TcpEstab++
+				case "06": // TIME_WAIT
+					insp.Network[i].TcpTimeWait++
+				}
 			}
 		}
-		insp.Network[i].TcpEstab = tcpEstab
-		insp.Network[i].TcpTimeWait = tcpTimeWait
-	}
-	return nil
+		return nil
+	})
+	return err
 }
 
-// 采集进程信息（包括 TopProcesses）
 func collectProcessInfo(client *ssh.Client, insp *str.Inspection) error {
-	// 进程总数
-	session, err := newSession(client)
+	// 获取总进程数
+	err := runCommandAndParse(client, "ps -e | wc -l", func(output string) error {
+		insp.Processes = uint32(parseUint(output))
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	defer session.Close()
-	procCount, err := runRemoteCommand(session, "ps -e | wc -l")
-	if err == nil {
-		insp.Processes = uint32(parseUint(procCount))
 	}
 
-	// 僵尸进程数
-	session, err = newSession(client)
-	if err != nil {
+	// 获取僵尸进程数
+	err = runCommandAndParse(client, "ps -eo state | grep -c '^Z'", func(output string) error {
+		// 如果命令返回空字符串或错误，说明没有僵尸进程
+		count, _ := strconv.ParseUint(strings.TrimSpace(output), 10, 64)
+		insp.ZombieProcs = uint32(count)
+		return nil
+	})
+	if err != nil && !strings.Contains(err.Error(), "status 1") {
+		// 只有当错误不是 "status 1" 时才返回错误
 		return err
-	}
-	defer session.Close()
-	zombieCount, err := runRemoteCommand(session, "ps -eo state | grep -c '^Z'")
-	if err == nil {
-		insp.ZombieProcs = uint32(parseUint(zombieCount))
 	}
 
-	// 前 10 个高 CPU 进程
-	session, err = newSession(client)
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-	topOutput, err := runRemoteCommand(session, "ps -eo pid,comm,pcpu,rss --sort=-pcpu | head -n 11") // 跳过表头取前5
-	if err != nil {
-		fmt.Printf("无法获取高 CPU 进程: %v\n", err)
-	} else {
-		lines := strings.Split(topOutput, "\n")
+	// 获取高 CPU 进程
+	return runCommandAndParse(client, "ps -eo pid,comm,pcpu,rss --sort=-pcpu | head -n 11", func(output string) error {
+		lines := strings.Split(output, "\n")
 		var topProcs []str.ProcessInfo
 		for _, line := range lines[1:] { // 跳过表头
 			fields := strings.Fields(line)
@@ -305,7 +265,7 @@ func collectProcessInfo(client *ssh.Client, insp *str.Inspection) error {
 			}
 			pid, _ := strconv.Atoi(fields[0])
 			cpuPercent, _ := strconv.ParseFloat(fields[2], 64)
-			memUsage := parseUint(fields[3]) * 1024 // RSS 以 KB 为单位，转换为字节
+			memUsage := parseUint(fields[3]) * 1024
 			topProcs = append(topProcs, str.ProcessInfo{
 				Pid:        pid,
 				Name:       fields[1],
@@ -314,33 +274,24 @@ func collectProcessInfo(client *ssh.Client, insp *str.Inspection) error {
 			})
 		}
 		insp.TopProcesses = topProcs
-	}
-	return nil
+		return nil
+	})
 }
 
-// 采集负载平均值
 func collectLoadAverage(client *ssh.Client, insp *str.Inspection) error {
-	session, err := newSession(client)
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-	output, err := runRemoteCommand(session, "uptime")
-	if err != nil {
-		return err
-	}
-	fields := strings.Fields(output)
-	if len(fields) >= 10 {
-		insp.CpuLoad[0], _ = strconv.ParseFloat(strings.TrimRight(fields[len(fields)-3], ","), 64)
-		insp.CpuLoad[1], _ = strconv.ParseFloat(strings.TrimRight(fields[len(fields)-2], ","), 64)
-		insp.CpuLoad[2], _ = strconv.ParseFloat(fields[len(fields)-1], 64)
-	}
-	return nil
+	return runCommandAndParse(client, "uptime", func(output string) error {
+		fields := strings.Fields(output)
+		if len(fields) >= 10 {
+			insp.CpuLoad[0], _ = strconv.ParseFloat(strings.TrimRight(fields[len(fields)-3], ","), 64)
+			insp.CpuLoad[1], _ = strconv.ParseFloat(strings.TrimRight(fields[len(fields)-2], ","), 64)
+			insp.CpuLoad[2], _ = strconv.ParseFloat(fields[len(fields)-1], 64)
+		}
+		return nil
+	})
 }
 
 func ConnectToServers(configs []*str.Config) []*str.Inspection {
 	var results []*str.Inspection
-
 	var eg, _ = errgroup.WithContext(context.Background())
 
 	for _, config := range configs {
@@ -374,4 +325,11 @@ func parseFloat(s string) float64 {
 func parseUint(s string) uint64 {
 	value, _ := strconv.ParseUint(s, 10, 64)
 	return value
+}
+func bytesToMB(bytes uint64) uint64 {
+	return bytes / (1024 * 1024)
+}
+
+func roundToThreeDecimalPlaces(value float64) float64 {
+	return math.Round(value*1000) / 1000
 }
