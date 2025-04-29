@@ -21,10 +21,9 @@ func sshConnect(ip string, port int, user, password string, router string) (*str
 	defer client.Close()
 
 	inspection := &str.Inspection{
-		Timestamp: time.Now(),
+		Timestamp: time.Now().Format(time.DateTime),
 		Ip:        ip,
 		Router:    router,
-		Output:    "已生成可视化报告,点击查看",
 	}
 
 	// 使用通用函数执行采集任务
@@ -79,21 +78,67 @@ func collectBasicInfo(client *ssh.Client, insp *str.Inspection) error {
 }
 
 func collectCpuInfo(client *ssh.Client, insp *str.Inspection) error {
-	var fields []string
-	err := runCommandAndParse(client, "cat /proc/stat | grep '^cpu '", func(output string) error {
-		fields = strings.Fields(output)
-		return nil
-	})
-	if err != nil || len(fields) < 5 {
-		return fmt.Errorf("CPU 数据格式错误")
+	// Helper function to parse /proc/stat and extract CPU fields
+	parseCpuStats := func() (map[string]float64, error) {
+		var fields []string
+		err := runCommandAndParse(client, "cat /proc/stat | grep '^cpu '", func(output string) error {
+			fields = strings.Fields(output)
+			return nil
+		})
+		if err != nil || len(fields) < 5 {
+			return nil, fmt.Errorf("CPU 数据格式错误")
+		}
+
+		stats := map[string]float64{
+			"user":   parseFloat(fields[1]),
+			"nice":   parseFloat(fields[2]),
+			"system": parseFloat(fields[3]),
+			"idle":   parseFloat(fields[4]),
+			"iowait": parseFloat(fields[5]),
+		}
+		return stats, nil
 	}
 
+	// First sample
+	prevStats, err := parseCpuStats()
+	if err != nil {
+		return err
+	}
+
+	// Wait for 1 second
+	time.Sleep(1 * time.Second)
+
+	// Second sample
+	currStats, err := parseCpuStats()
+	if err != nil {
+		return err
+	}
+
+	// Calculate diffs
+	diff := map[string]float64{}
+	for key := range prevStats {
+		diff[key] = currStats[key] - prevStats[key]
+	}
+
+	// Total CPU time diff
+	totalDiff := diff["user"] + diff["nice"] + diff["system"] + diff["idle"] + diff["iowait"]
+
+	// Calculate CPU usage
+	cpuUsage := (totalDiff - diff["idle"] - diff["iowait"]) / totalDiff * 100
+
+	// Get CPU core count
 	totalCores, _ := strconv.ParseUint(runRemoteCommandOrDefault(client, "nproc", "1"), 10, 64)
+
+	// Convert jiffies to minutes (HZ=1000, 1 jiffy = 1ms)
+	const hzToMinutes = 1000 * 60 // HZ=1000, convert to minutes
+
+	// Populate Inspection struct
 	insp.Cpu = str.CpuInfo{
 		Total:  totalCores,
-		User:   roundToThreeDecimalPlaces(parseFloat(fields[1]) / 60), // 转换为分钟，保留三位小数
-		System: roundToThreeDecimalPlaces(parseFloat(fields[3]) / 60), // 转换为分钟，保留三位小数
-		Idle:   roundToThreeDecimalPlaces(parseFloat(fields[4]) / 60), // 转换为分钟，保留三位小数
+		User:   roundToThreeDecimalPlaces(diff["user"] / hzToMinutes),
+		System: roundToThreeDecimalPlaces(diff["system"] / hzToMinutes),
+		Idle:   roundToThreeDecimalPlaces(diff["idle"] / hzToMinutes),
+		Usage:  roundToThreeDecimalPlaces(cpuUsage), // CPU 使用率不需要单位转换
 	}
 	return nil
 }
@@ -327,7 +372,7 @@ func parseUint(s string) uint64 {
 	return value
 }
 func bytesToMB(bytes uint64) uint64 {
-	return bytes / (1024 * 1024)
+	return bytes / 1048576
 }
 
 func roundToThreeDecimalPlaces(value float64) float64 {

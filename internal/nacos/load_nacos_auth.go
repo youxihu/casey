@@ -24,6 +24,5 @@ func LoadNacosAuth(filePath string) (*str.AuthConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return &wrapper.Auth, nil
 }

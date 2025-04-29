@@ -13,7 +13,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            background-color: #f4f4f9; /* 背景颜色保持不变 */
+            background-color: #f4f4f9;
             height: 100vh;
             overflow: hidden;
         }
@@ -29,30 +29,52 @@
             height: 350px;
             margin: 5px;
             position: relative;
-            background: rgba(255, 255, 255, 0.1); /* 半透明背景 */
-            backdrop-filter: blur(10px); /* 背景模糊 */
-            border-radius: 0; /* 移除圆角 */
-            box-shadow: none; /* 移除阴影 */
-            border: none; /* 移除边框 */
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 0;
+            box-shadow: none;
+            border: none;
         }
         h1 {
             text-align: center;
             margin: 20px 0;
-            color: #333; /* 文字颜色更清晰 */
-            text-shadow: none; /* 移除文字阴影 */
+            color: #333;
+            text-shadow: none;
         }
         .loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #666; /* 加载文字颜色 */
+            color: #666;
             font-weight: bold;
+        }
+        .switch-buttons {
+            margin: 20px 0;
+        }
+        .switch-buttons button {
+            padding: 10px 20px;
+            margin: 0 10px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        .switch-buttons button:hover {
+            background-color: #0056b3;
         }
     </style>
 </head>
 <body>
 <h1>AiOps运维智能体可视化报告</h1>
+
+<div class="switch-buttons">
+    <button id="load-pie">饼状分布视图</button>
+    <button id="load-line">动态趋势视图</button>
+</div>
 
 <div class="chart-row">
     <div id="cpu-chart" class="chart-container"><div class="loading">加载中...</div></div>
@@ -65,126 +87,89 @@
 </div>
 
 <script>
-    // 初始化 ECharts 实例
-    const charts = {
-        cpu: echarts.init(document.getElementById('cpu-chart')),
-        memory: echarts.init(document.getElementById('memory-chart')),
-        disk: echarts.init(document.getElementById('disk-chart')),
-        network: echarts.init(document.getElementById('network-chart')),
-        processes: echarts.init(document.getElementById('processes-chart'))
-    };
+    // 封装 ECharts 初始化逻辑
+    const chartManager = (function () {
+        let charts = {};
 
-    // 获取数据并渲染图表
-    fetch('/ops/inspect')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            console.log('Received data:', data);
-            const inspections = data.data;
-
-            // CPU 用户态运行时间饼图（单位：分钟）
-            charts.cpu.setOption({
-                title: { text: 'CPU 用户态运行时间 (分钟)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} 分钟' },
-                color: ['#FF6F61', '#6B5B95', '#88B04B', '#F7CAC9', '#92A8D1'],
-                series: [{
-                    name: 'CPU 用户态',
-                    type: 'pie',
-                    radius: ['40%', '70%'],
-                    center: ['50%', '60%'],
-                    data: inspections.map(item => ({
-                        name: item.hostname,
-                        value: item.cpu?.user || 0 // 单位已经是分钟
-                    })),
-                    label: { show: true, formatter: '{b}: {c} 分钟', color: '#333' },
-                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-                }]
+        function init() {
+            const containers = ['cpu-chart', 'memory-chart', 'disk-chart', 'network-chart', 'processes-chart'];
+            containers.forEach(id => {
+                charts[id] = echarts.init(document.getElementById(id));
             });
+        }
 
-            // 内存使用量饼图（单位：MB）
-            charts.memory.setOption({
-                title: { text: '内存使用量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
-                color: ['#FFD700', '#24cfca', '#32CD32', '#00BFFF', '#ffb6c1'],
-                series: [{
-                    name: '内存使用量',
-                    type: 'pie',
-                    radius: ['40%', '70%'],
-                    center: ['50%', '60%'],
-                    data: inspections.map(item => ({
-                        name: item.hostname,
-                        value: item.memory?.used || 0 // 单位已经是 MB
-                    })),
-                    label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
-                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-                }]
-            });
+        function destroy() {
+            Object.values(charts).forEach(chart => chart.dispose());
+            charts = {};
+        }
 
-            // 磁盘使用量饼图（单位：MB）
-            charts.disk.setOption({
-                title: { text: '磁盘使用量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
-                color: ['#FF69B4', '#4682B4', '#2E8B57', '#FFA500', '#8A2BE2'],
-                series: [{
-                    name: '磁盘使用量',
-                    type: 'pie',
-                    radius: ['40%', '70%'],
-                    center: ['50%', '60%'],
-                    data: inspections.map(item => ({
-                        name: item.hostname,
-                        value: item.disk[0]?.used || 0 // 单位已经是 MB
-                    })),
-                    label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
-                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-                }]
-            });
+        function getCharts() {
+            return charts;
+        }
 
-            // 网络流量饼图（单位：MB）
-            charts.network.setOption({
-                title: { text: '网络流量 (MB)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} MB' },
-                color: ['#FF1493', '#00CED1', '#FF8C00', '#7B68EE', '#20B2AA'],
-                series: [{
-                    name: '网络流量',
-                    type: 'pie',
-                    radius: ['40%', '70%'],
-                    center: ['50%', '60%'],
-                    data: inspections.map(item => ({
-                        name: item.hostname,
-                        value: ((item.network[0]?.sent || 0) + (item.network[0]?.recv || 0)) // 单位已经是 MB
-                    })),
-                    label: { show: true, formatter: '{b}: {c} MB', color: '#333' },
-                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-                }]
-            });
+        return { init, destroy, getCharts };
+    })();
 
-            // 进程数量饼图
-            charts.processes.setOption({
-                title: { text: '进程数量 (个)', left: 'center', top: '5%', textStyle: { color: '#333' } },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c}' },
-                color: ['#FF4500', '#00FA9A', '#8A2BE2', '#FFD700', '#1E90FF'],
-                series: [{
-                    name: '进程数量',
-                    type: 'pie',
-                    radius: ['40%', '70%'],
-                    center: ['50%', '60%'],
-                    data: inspections.map(item => ({
-                        name: item.hostname,
-                        value: (item.processes || 0) + (item.zombieProcs || 0)
-                    })),
-                    label: { show: true, formatter: '{b}: {c}', color: '#333' },
-                    emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
-                }]
-            });
-        })
-        .catch(error => {
-            console.error('Error fetching data:', error);
-            Object.values(charts).forEach(chart => chart.showLoading({ text: '数据加载失败', color: '#333' }));
+    // 动态加载脚本函数
+    function loadScript(src, callback) {
+        const existingScript = document.querySelector(`script[src="${src}"]`);
+        if (existingScript) {
+            callback();
+        } else {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = callback;
+            document.body.appendChild(script);
+        }
+    }
+
+    // 清空所有图表
+    function clearCharts() {
+        const charts = ['cpu-chart', 'memory-chart', 'disk-chart', 'network-chart', 'processes-chart'];
+        charts.forEach(id => {
+            const container = document.getElementById(id);
+            container.innerHTML = '<div class="loading">加载中...</div>';
         });
+    }
+
+    // 初始化饼图
+    function initPieCharts() {
+        clearCharts();
+        chartManager.destroy(); // 销毁旧的 ECharts 实例
+        chartManager.init(); // 初始化新的 ECharts 实例
+
+        loadScript('/static/pie-charts.js', () => {
+            console.log('饼图加载完成');
+            if (typeof initializePieCharts === 'function') {
+                initializePieCharts(chartManager.getCharts());
+            } else {
+                console.error('initializePieCharts 函数未定义');
+            }
+        });
+    }
+
+    // 初始化折线图
+    function initLineCharts() {
+        clearCharts();
+        chartManager.destroy(); // 销毁旧的 ECharts 实例
+        chartManager.init(); // 初始化新的 ECharts 实例
+
+        loadScript('/static/line-charts.js', () => {
+            console.log('折线图加载完成');
+            if (typeof initializeLineCharts === 'function') {
+                initializeLineCharts(chartManager.getCharts());
+            } else {
+                console.error('initializeLineCharts 函数未定义');
+            }
+        });
+    }
+
+    // 绑定按钮事件
+    document.getElementById('load-pie').addEventListener('click', initPieCharts);
+    document.getElementById('load-line').addEventListener('click', initLineCharts);
+
+    // 默认加载饼图
+    initPieCharts();
 </script>
 </body>
 </html>

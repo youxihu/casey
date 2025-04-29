@@ -21,10 +21,15 @@ type MySQL struct {
 	User    string `yaml:"user"`
 	Passwd  string `yaml:"passwd"`
 }
+type Redis struct {
+	Address string `yaml:"address"`
+	Passwd  string `yaml:"passwd"`
+}
 
 // Process 表示进程配置
 type Process struct {
 	MySQL map[string]MySQL `yaml:"mysql"`
+	Redis map[string]Redis `yaml:"redis"`
 }
 
 // Config 表示整个配置

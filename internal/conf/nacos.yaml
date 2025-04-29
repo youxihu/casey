@@ -1,0 +1,12 @@
+auth:
+  host: 192.168.2.254
+  port: 8848
+  username: youxihu
+  password: P@ssword1
+  namespace_id: 9e164514-4bfd-4d7b-aee6-739509331121
+  timeout_ms: 500
+  log_dir: cache/nacos/log/
+  cache_dir: cache/nacos/
+  log_level: debug
+  data_id: casey
+  group: DEFAULT_GROUP

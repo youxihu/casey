@@ -1,9 +1,7 @@
 package str
 
-import "time"
-
 type Inspection struct {
-	Timestamp    time.Time     `json:"timestamp"`    // 采集时间
+	Timestamp    string        `json:"timestamp"`    // 采集时间
 	Hostname     string        `json:"hostname"`     // 主机名
 	Os           string        `json:"os"`           // 操作系统
 	Ip           string        `json:"ip"`           // IP 地址
@@ -16,7 +14,6 @@ type Inspection struct {
 	Processes    uint32        `json:"processes"`    // 进程总数
 	ZombieProcs  uint32        `json:"zombieProcs"`  // 僵尸进程数
 	TopProcesses []ProcessInfo `json:"topProcesses"` // 前 N 个高占用进程
-	Output       string        `json:"output"`
 }
 
 // CPU 信息
@@ -25,6 +22,7 @@ type CpuInfo struct {
 	User   float64 `json:"user"`   // 用户态使用率
 	System float64 `json:"system"` // 系统态使用率
 	Idle   float64 `json:"idle"`   // 空闲率
+	Usage  float64 `json:"usage"`  // 总使用率
 }
 
 // 内存信息
