@@ -3,3 +3,5 @@ cache/
 .idea
 
 .git
+
+config/nacos/
