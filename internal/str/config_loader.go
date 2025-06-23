@@ -1,16 +1,15 @@
-package service
+package str
 
 import (
 	"fmt"
-	"github.com/youxihu/casey/internal/str"
 	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 )
 
 // LoadAllConfigsInDir 加载目录下所有文件（无论文件名），尝试解析为 YAML 配置
-func LoadAllConfigsInDir(dirPath string) ([]*str.Config, error) {
-	var configs []*str.Config
+func LoadAllConfigsInDir(dirPath string) ([]*Config, error) {
+	var configs []*Config
 
 	// 读取目录下所有文件（不递归子目录）
 	entries, err := os.ReadDir(dirPath)
@@ -27,13 +26,11 @@ func LoadAllConfigsInDir(dirPath string) ([]*str.Config, error) {
 		fullPath := filepath.Join(dirPath, entry.Name())
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
-			fmt.Printf("警告: 无法读取文件 %s (跳过): %v\n", fullPath, err)
 			continue
 		}
 
-		var config str.Config
+		var config Config
 		if err := yaml.Unmarshal(data, &config); err != nil {
-			fmt.Printf("警告: 文件 %s 不是有效的 YAML (跳过): %v\n", fullPath, err)
 			continue
 		}
 		configs = append(configs, &config)
@@ -44,5 +41,4 @@ func LoadAllConfigsInDir(dirPath string) ([]*str.Config, error) {
 	}
 
 	return configs, nil
-
-}
+} 
